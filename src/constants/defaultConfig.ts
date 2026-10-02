@@ -1,0 +1,42 @@
+import { ProjectConfig, ScriptFileKey } from "../types/translator";
+
+export const DEFAULT_CONFIG: ProjectConfig = {
+  projectDir: "D:\\Projects\\VoiceTranslator",
+  pythonCmd: "python",
+  cudaProfile: "pt251_cu121",
+  micDeviceIndex: 1,
+  secondaryMicDeviceIndex: null,
+  preferredMicName: "MR720",
+  headphonesOutputIndex: null,
+  loopbackDeviceIndex: null,
+  loopbackBackend: "pyaudiowpatch",
+  whisperModel: "large-v3-turbo",
+  computeType: "float16",
+  micTtsMode: "mywo_adapted",
+  micOutputRoute: "auto_vbcable_or_mute",
+  voiceSampleFile: "mywo.wav",
+  voiceAdaptStrength: 0.82,
+  voicePitchSemitones: 0.0,
+  voiceBaseGender: "male",
+  sileroSpeaker: "aidar",
+  sileroSampleRate: 48000,
+  vadThreshold: 0.004,
+  phraseDurationSec: 1.8,
+  deleteMyVoiceWav: false,
+  alwaysOnTopGui: true,
+};
+
+export const ALL_FILE_KEYS: ScriptFileKey[] = [
+  "translator_gui.py",
+  "step5_install_vbcable.bat",
+  "run.bat",
+  "translator_mic.py",
+  "translator_loopback.py",
+  "check_devices.py",
+  "step3_check_audio.bat",
+  "requirements.txt",
+  "step1_clean.bat",
+  "step2_1_create_venv.bat",
+  "step2_2_install_pytorch.bat",
+  "step2_3_install_engines.bat",
+];
