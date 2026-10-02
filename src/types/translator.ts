@@ -47,6 +47,7 @@ export interface StepCompletionState {
 
 export type ScriptFileKey =
   | "translator_gui.py"
+  | "vt_dsp_core.py"
   | "step5_install_vbcable.bat"
   | "run.bat"
   | "translator_mic.py"

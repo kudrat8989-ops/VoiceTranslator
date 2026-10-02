@@ -28,15 +28,16 @@ export const DEFAULT_CONFIG: ProjectConfig = {
 
 export const ALL_FILE_KEYS: ScriptFileKey[] = [
   "translator_gui.py",
-  "step5_install_vbcable.bat",
-  "run.bat",
-  "translator_mic.py",
-  "translator_loopback.py",
-  "check_devices.py",
-  "step3_check_audio.bat",
-  "requirements.txt",
+  "vt_dsp_core.py",
   "step1_clean.bat",
   "step2_1_create_venv.bat",
   "step2_2_install_pytorch.bat",
   "step2_3_install_engines.bat",
+  "step3_check_audio.bat",
+  "step5_install_vbcable.bat",
+  "run.bat",
+  "requirements.txt",
+  "check_devices.py",
+  "translator_mic.py",
+  "translator_loopback.py",
 ];

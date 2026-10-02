@@ -7,18 +7,23 @@ export function buildGuiWindowClassPy(config: ProjectConfig): string {
 class VoiceTranslatorMonitorApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("VoiceTranslator Monitor v2.3 — Свой образец голоса + Защита от 20 слов")
-        self.root.geometry("1040x760")
+        self.root.title("VoiceTranslator Monitor v2.4 — Управление Авто-Переводом + Нейронный голос + Годы")
+        self.root.geometry("1080x800")
         self.root.configure(bg="#0B0F17")
         self.root.attributes("-topmost", ${alwaysOnTop})
 
         self.running = True
-        self.mic_enabled = tk.BooleanVar(value=True)
-        self.loopback_enabled = tk.BooleanVar(value=True)
+        # Независимое включение/отключение Авто-Перевода и Озвучки для Микрофона и Динамика
+        self.mic_auto_translate = tk.BooleanVar(value=True)
+        self.mic_auto_tts = tk.BooleanVar(value=True)
+        self.loopback_auto_translate = tk.BooleanVar(value=True)
+        self.loopback_auto_tts = tk.BooleanVar(value=True)
+
         self.always_on_top_var = tk.BooleanVar(value=${alwaysOnTop})
         self.vad_threshold = tk.DoubleVar(value=VAD_THRESHOLD_DEFAULT)
         self.adapt_strength = tk.DoubleVar(value=ADAPT_STRENGTH_DEFAULT)
         self.pitch_semitones = tk.DoubleVar(value=PITCH_SEMITONES_DEFAULT)
+        self.selected_neural_voice_label = tk.StringVar(value="Авто-подбор под мой образец (Рекомендуется)")
         self.current_voice_path = VOICE_SAMPLE_PATH
 
         self.input_devices_map: dict[str, int | None] = {}
@@ -32,15 +37,19 @@ class VoiceTranslatorMonitorApp:
         self.mic_last_heartbeat = time.time()
         self.is_playing_headphone_tts = False
         self.is_playing_speaker_echo = False
+        self.manual_mic_trigger = False
+        self.manual_loop_trigger = False
+
         self.gpu_status_text = tk.StringVar(value="Запуск микрофона и прогрев RTX 5070 Ti...")
         self.voice_status_text = tk.StringVar(value="Загрузка профиля голоса...")
 
         self.ui_queue: "queue.Queue[tuple]" = queue.Queue()
+        self.silero_play_queue: "queue.Queue[tuple[str, str, int]]" = queue.Queue()
         self.gpu_lock = threading.Lock()
         self.whisper_model = None
         self.silero_model = None
         self.voice_profile = VoiceClonerProfile(self.current_voice_path, VOICE_BASE_GENDER)
-        self.en_tts_worker = PersistentEnTtsWorker(VOICE_BASE_GENDER)
+        self.en_tts_worker = NeuralAndSapiTtsEngine(VOICE_BASE_GENDER)
         self.force_restart_flag = False
 
         self._build_ui()
@@ -50,42 +59,40 @@ class VoiceTranslatorMonitorApp:
 
         threading.Thread(target=self._mic_worker_loop, daemon=True).start()
         threading.Thread(target=self._loopback_worker_loop, daemon=True).start()
+        threading.Thread(target=self._silero_playback_worker, daemon=True).start()
         threading.Thread(target=self._init_models_and_workers, daemon=True).start()
 
     def _refresh_voice_status_banner(self):
         if self.voice_profile.loaded:
             fname = os.path.basename(self.voice_profile.wav_path)
             self.voice_status_text.set(
-                f"Активен образец: {fname} | Ваш тон F0 = {self.voice_profile.target_f0:.1f} Гц"
+                f"{fname} | Ваш F0={self.voice_profile.target_f0:.0f} Гц -> Нейро-голос: {self.voice_profile.matched_neural_voice}"
             )
         else:
             fname = os.path.basename(self.current_voice_path)
             self.voice_status_text.set(
-                f"Файл '{fname}' не найден — нажмите «Выбрать .wav» или «Записать с микрофона (4 сек)»"
+                f"Образец '{fname}' не найден — нажмите «Записать с микрофона (4 сек)» или «Выбрать .wav»"
             )
 
     def _build_ui(self):
         top = tk.Frame(self.root, bg="#111726", padx=14, pady=8)
         top.pack(fill=tk.X, padx=10, pady=(8, 4))
-        lbl_title = tk.Label(
-            top, text="VOICETRANSLATOR v2.3 (СВОЙ ОБРАЗЕЦ ГОЛОСА + ЗАЩИТА ОТ 20 СЛОВ)",
-            bg="#111726", fg="#F8FAFC", font=("Consolas", 11, "bold"),
-        )
-        lbl_title.pack(side=tk.LEFT)
-        chk_top = tk.Checkbutton(
+        tk.Label(
+            top, text="VOICETRANSLATOR v2.4 (УПРАВЛЕНИЕ АВТО-ПЕРЕВОДОМ · НЕЙРОННЫЙ ГОЛОС · ТОЧНЫЕ ГОДЫ)",
+            bg="#111726", fg="#F8FAFC", font=("Consolas", 10, "bold"),
+        ).pack(side=tk.LEFT)
+        tk.Checkbutton(
             top, text="Поверх всех окон", variable=self.always_on_top_var, command=self._toggle_topmost,
             bg="#111726", fg="#CBD5E1", selectcolor="#0B0F17",
             activebackground="#111726", activeforeground="#FFFFFF", font=("Segoe UI", 9),
-        )
-        chk_top.pack(side=tk.RIGHT, padx=(10, 0))
-        lbl_gpu = tk.Label(top, textvariable=self.gpu_status_text, bg="#111726", fg="#34D399", font=("Consolas", 9, "bold"))
-        lbl_gpu.pack(side=tk.RIGHT)
+        ).pack(side=tk.RIGHT, padx=(10, 0))
+        tk.Label(top, textvariable=self.gpu_status_text, bg="#111726", fg="#34D399", font=("Consolas", 9, "bold")).pack(side=tk.RIGHT)
 
         # Блок 1: Выбор микрофонов
-        mic_box = tk.Frame(self.root, bg="#111726", padx=14, pady=8, highlightbackground="#10B981", highlightthickness=1)
-        mic_box.pack(fill=tk.X, padx=10, pady=4)
+        mic_box = tk.Frame(self.root, bg="#111726", padx=14, pady=7, highlightbackground="#10B981", highlightthickness=1)
+        mic_box.pack(fill=tk.X, padx=10, pady=3)
         row_m1 = tk.Frame(mic_box, bg="#111726")
-        row_m1.pack(fill=tk.X, pady=(0, 5))
+        row_m1.pack(fill=tk.X, pady=(0, 4))
         tk.Label(row_m1, text="Основной микрофон (Вход 1):", bg="#111726", fg="#34D399", font=("Segoe UI", 9, "bold"), width=26, anchor="w").pack(side=tk.LEFT)
         self.combo_prim_mic = ttk.Combobox(row_m1, textvariable=self.selected_primary_mic_label, state="readonly", width=52)
         self.combo_prim_mic.pack(side=tk.LEFT, padx=(4, 8))
@@ -100,54 +107,91 @@ class VoiceTranslatorMonitorApp:
         self.combo_sec_mic.pack(side=tk.LEFT, padx=(4, 8))
         self.combo_sec_mic.bind("<<ComboboxSelected>>", self._on_mic_selection_changed)
 
-        # Блок 2: Панель образца вашего голоса
+        # Блок 2: Нейронный профиль вашего голоса (Edge-TTS Neural + mywo.wav)
         voice_box = tk.Frame(self.root, bg="#111726", padx=14, pady=8, highlightbackground="#F59E0B", highlightthickness=1)
-        voice_box.pack(fill=tk.X, padx=10, pady=4)
+        voice_box.pack(fill=tk.X, padx=10, pady=3)
         v_row1 = tk.Frame(voice_box, bg="#111726")
-        v_row1.pack(fill=tk.X, pady=(0, 6))
-        tk.Label(v_row1, text="Образец вашего голоса:", bg="#111726", fg="#FBBF24", font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT)
-        tk.Label(v_row1, textvariable=self.voice_status_text, bg="#111726", fg="#F8FAFC", font=("Consolas", 9, "bold")).pack(side=tk.LEFT, padx=(8, 10))
+        v_row1.pack(fill=tk.X, pady=(0, 5))
+        tk.Label(v_row1, text="Ваш голос:", bg="#111726", fg="#FBBF24", font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT)
+        tk.Label(v_row1, textvariable=self.voice_status_text, bg="#111726", fg="#F8FAFC", font=("Consolas", 9, "bold")).pack(side=tk.LEFT, padx=(6, 10))
         tk.Button(v_row1, text="Тест моего голоса", command=self._test_my_adapted_voice, bg="#059669", fg="#FFFFFF", relief=tk.FLAT, padx=10, pady=2, font=("Segoe UI", 8, "bold")).pack(side=tk.RIGHT, padx=(6, 0))
         tk.Button(v_row1, text="Записать с микрофона (4 сек)", command=self._record_voice_sample_from_mic, bg="#D97706", fg="#FFFFFF", relief=tk.FLAT, padx=10, pady=2, font=("Segoe UI", 8, "bold")).pack(side=tk.RIGHT, padx=(6, 0))
         tk.Button(v_row1, text="Выбрать .wav...", command=self._browse_voice_sample_wav, bg="#334155", fg="#F8FAFC", relief=tk.FLAT, padx=10, pady=2, font=("Segoe UI", 8, "bold")).pack(side=tk.RIGHT)
 
+        v_row_neural = tk.Frame(voice_box, bg="#111726")
+        v_row_neural.pack(fill=tk.X, pady=(0, 5))
+        tk.Label(v_row_neural, text="Базовый нейронный тембр (Edge-TTS Neural):", bg="#111726", fg="#CBD5E1", font=("Segoe UI", 9)).pack(side=tk.LEFT)
+        self.combo_neural = ttk.Combobox(
+            v_row_neural, textvariable=self.selected_neural_voice_label,
+            values=list(NEURAL_VOICES_CATALOG.keys()), state="readonly", width=52,
+        )
+        self.combo_neural.pack(side=tk.LEFT, padx=8)
+        self.combo_neural.bind("<<ComboboxSelected>>", self._on_neural_voice_changed)
+
         v_row2 = tk.Frame(voice_box, bg="#111726")
         v_row2.pack(fill=tk.X)
-        tk.Label(v_row2, text="Тон голоса (полутона, ниже/выше):", bg="#111726", fg="#CBD5E1", font=("Segoe UI", 8)).pack(side=tk.LEFT)
-        tk.Scale(v_row2, from_=-6.0, to=6.0, resolution=0.5, orient=tk.HORIZONTAL, variable=self.pitch_semitones, bg="#111726", fg="#FBBF24", highlightthickness=0, troughcolor="#0B0F17", length=160).pack(side=tk.LEFT, padx=(6, 18))
-        tk.Label(v_row2, text="Сила переноса тембра:", bg="#111726", fg="#CBD5E1", font=("Segoe UI", 8)).pack(side=tk.LEFT)
-        tk.Scale(v_row2, from_=0.0, to=1.0, resolution=0.05, orient=tk.HORIZONTAL, variable=self.adapt_strength, bg="#111726", fg="#34D399", highlightthickness=0, troughcolor="#0B0F17", length=140).pack(side=tk.LEFT, padx=(6, 18))
+        tk.Label(v_row2, text="Тон (полутона):", bg="#111726", fg="#CBD5E1", font=("Segoe UI", 8)).pack(side=tk.LEFT)
+        tk.Scale(v_row2, from_=-6.0, to=6.0, resolution=0.5, orient=tk.HORIZONTAL, variable=self.pitch_semitones, bg="#111726", fg="#FBBF24", highlightthickness=0, troughcolor="#0B0F17", length=150).pack(side=tk.LEFT, padx=(6, 16))
+        tk.Label(v_row2, text="Тембр 3-полосный EQ:", bg="#111726", fg="#CBD5E1", font=("Segoe UI", 8)).pack(side=tk.LEFT)
+        tk.Scale(v_row2, from_=0.0, to=1.0, resolution=0.05, orient=tk.HORIZONTAL, variable=self.adapt_strength, bg="#111726", fg="#34D399", highlightthickness=0, troughcolor="#0B0F17", length=130).pack(side=tk.LEFT, padx=(6, 16))
         tk.Label(v_row2, text="Порог микрофона (VAD):", bg="#111726", fg="#CBD5E1", font=("Segoe UI", 8)).pack(side=tk.LEFT)
-        tk.Scale(v_row2, from_=0.001, to=0.025, resolution=0.001, orient=tk.HORIZONTAL, variable=self.vad_threshold, bg="#111726", fg="#38BDF8", highlightthickness=0, troughcolor="#0B0F17", length=140).pack(side=tk.LEFT, padx=(6, 0))
+        tk.Scale(v_row2, from_=0.001, to=0.025, resolution=0.001, orient=tk.HORIZONTAL, variable=self.vad_threshold, bg="#111726", fg="#38BDF8", highlightthickness=0, troughcolor="#0B0F17", length=130).pack(side=tk.LEFT, padx=(6, 0))
 
-        # Блок 3: Маршрутизация вывода и шкалы RMS
+        # Блок 3: Маршрутизация вывода
         route_box = tk.Frame(self.root, bg="#111726", padx=14, pady=6)
-        route_box.pack(fill=tk.X, padx=10, pady=4)
+        route_box.pack(fill=tk.X, padx=10, pady=3)
         tk.Label(route_box, text="Куда выводить ваш перевод EN:", bg="#111726", fg="#F8FAFC", font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT)
         self.combo_out = ttk.Combobox(route_box, textvariable=self.selected_mic_out_label, state="readonly", width=52)
         self.combo_out.pack(side=tk.LEFT, padx=8)
         tk.Button(route_box, text="Установить VB-Cable (1 клик)", command=self._run_vbcable_installer, bg="#0284C7", fg="#FFFFFF", relief=tk.FLAT, padx=10, pady=2, font=("Segoe UI", 8, "bold")).pack(side=tk.LEFT)
 
-        meters = tk.Frame(self.root, bg="#111726", padx=14, pady=8)
-        meters.pack(fill=tk.X, padx=10, pady=4)
+        # Блок 4: Управление Авто-Переводом Микрофона и Динамика + Шкалы RMS
+        meters = tk.Frame(self.root, bg="#111726", padx=14, pady=8, highlightbackground="#334155", highlightthickness=1)
+        meters.pack(fill=tk.X, padx=10, pady=3)
+
+        # Канал 1: Микрофон
         m1 = tk.Frame(meters, bg="#111726")
         m1.pack(fill=tk.X, pady=(0, 6))
-        tk.Checkbutton(m1, text="КАНАЛ 1: Ваш Микрофон (RU -> EN)", variable=self.mic_enabled, bg="#111726", fg="#34D399", selectcolor="#0B0F17", activebackground="#111726", font=("Segoe UI", 9, "bold"), width=34, anchor="w").pack(side=tk.LEFT)
-        self.canvas_mic = tk.Canvas(m1, width=320, height=14, bg="#0B0F17", highlightthickness=1, highlightbackground="#1E293B")
-        self.canvas_mic.pack(side=tk.LEFT, padx=10)
-        self.lbl_mic_rms = tk.Label(m1, text="RMS: 0.0000 | Ожидание", bg="#111726", fg="#94A3B8", font=("Consolas", 9), width=28, anchor="w")
+        tk.Checkbutton(
+            m1, text="АВТО-ПЕРЕВОД МИКРОФОНА (RU -> EN)", variable=self.mic_auto_translate,
+            bg="#111726", fg="#34D399", selectcolor="#0B0F17", activebackground="#111726",
+            font=("Segoe UI", 9, "bold"), width=33, anchor="w",
+        ).pack(side=tk.LEFT)
+        self.canvas_mic = tk.Canvas(m1, width=220, height=14, bg="#0B0F17", highlightthickness=1, highlightbackground="#1E293B")
+        self.canvas_mic.pack(side=tk.LEFT, padx=8)
+        self.lbl_mic_rms = tk.Label(m1, text="RMS: 0.0000 | АКТИВЕН", bg="#111726", fg="#94A3B8", font=("Consolas", 9), width=24, anchor="w")
         self.lbl_mic_rms.pack(side=tk.LEFT)
-        tk.Button(m1, text="Перезапустить входы", command=self._trigger_manual_restart, bg="#1E293B", fg="#E2E8F0", relief=tk.FLAT, padx=8, pady=2, font=("Segoe UI", 8)).pack(side=tk.RIGHT)
+        tk.Checkbutton(
+            m1, text="Озвучивать EN", variable=self.mic_auto_tts,
+            bg="#111726", fg="#CBD5E1", selectcolor="#0B0F17", activebackground="#111726", font=("Segoe UI", 8),
+        ).pack(side=tk.LEFT, padx=4)
+        tk.Button(
+            m1, text="Перевести фразу сейчас", command=self._trigger_manual_mic_translate,
+            bg="#059669", fg="#FFFFFF", relief=tk.FLAT, padx=8, pady=2, font=("Segoe UI", 8, "bold"),
+        ).pack(side=tk.RIGHT)
 
+        # Канал 2: Динамик (Собеседник)
         m2 = tk.Frame(meters, bg="#111726")
         m2.pack(fill=tk.X)
-        tk.Checkbutton(m2, text="КАНАЛ 2: Собеседник (EN -> Silero RU)", variable=self.loopback_enabled, bg="#111726", fg="#38BDF8", selectcolor="#0B0F17", activebackground="#111726", font=("Segoe UI", 9, "bold"), width=34, anchor="w").pack(side=tk.LEFT)
-        self.canvas_loop = tk.Canvas(m2, width=320, height=14, bg="#0B0F17", highlightthickness=1, highlightbackground="#1E293B")
-        self.canvas_loop.pack(side=tk.LEFT, padx=10)
-        self.lbl_loop_rms = tk.Label(m2, text="RMS: 0.0000 | Слушаю", bg="#111726", fg="#94A3B8", font=("Consolas", 9), width=28, anchor="w")
+        tk.Checkbutton(
+            m2, text="АВТО-ПЕРЕВОД ДИНАМИКА (EN -> RU)", variable=self.loopback_auto_translate,
+            bg="#111726", fg="#38BDF8", selectcolor="#0B0F17", activebackground="#111726",
+            font=("Segoe UI", 9, "bold"), width=33, anchor="w",
+        ).pack(side=tk.LEFT)
+        self.canvas_loop = tk.Canvas(m2, width=220, height=14, bg="#0B0F17", highlightthickness=1, highlightbackground="#1E293B")
+        self.canvas_loop.pack(side=tk.LEFT, padx=8)
+        self.lbl_loop_rms = tk.Label(m2, text="RMS: 0.0000 | СЛУШАЮ", bg="#111726", fg="#94A3B8", font=("Consolas", 9), width=24, anchor="w")
         self.lbl_loop_rms.pack(side=tk.LEFT)
-        tk.Button(m2, text="Очистить лог", command=self._clear_log, bg="#1E293B", fg="#CBD5E1", relief=tk.FLAT, padx=8, pady=2, font=("Segoe UI", 8)).pack(side=tk.RIGHT)
+        tk.Checkbutton(
+            m2, text="Озвучивать RU", variable=self.loopback_auto_tts,
+            bg="#111726", fg="#CBD5E1", selectcolor="#0B0F17", activebackground="#111726", font=("Segoe UI", 8),
+        ).pack(side=tk.LEFT, padx=4)
+        tk.Button(
+            m2, text="Перевести собеседника сейчас", command=self._trigger_manual_loop_translate,
+            bg="#0284C7", fg="#FFFFFF", relief=tk.FLAT, padx=8, pady=2, font=("Segoe UI", 8, "bold"),
+        ).pack(side=tk.RIGHT)
 
+        # Лог живого диалога
         log_frame = tk.Frame(self.root, bg="#0B0F17", padx=10, pady=4)
         log_frame.pack(fill=tk.BOTH, expand=True)
         self.txt_log = scrolledtext.ScrolledText(log_frame, bg="#080B11", fg="#E2E8F0", insertbackground="#FFFFFF", font=("Consolas", 10), wrap=tk.WORD, state=tk.DISABLED)
@@ -159,6 +203,18 @@ class VoiceTranslatorMonitorApp:
         self.txt_log.tag_config("en_peer", foreground="#38BDF8")
         self.txt_log.tag_config("ru_silero", foreground="#C084FC")
         self.txt_log.tag_config("err", foreground="#F87171")
+
+    def _on_neural_voice_changed(self, _event=None):
+        lbl = self.selected_neural_voice_label.get()
+        voice_id = NEURAL_VOICES_CATALOG.get(lbl, "auto")
+        self.en_tts_worker.selected_voice_override = voice_id
+        self.log_message(f"[НЕЙРО-ГОЛОС] Выбран базовый тембр: {lbl}", "sys_ok")
+
+    def _trigger_manual_mic_translate(self):
+        self.manual_mic_trigger = True
+
+    def _trigger_manual_loop_translate(self):
+        self.manual_loop_trigger = True
 
     def _browse_voice_sample_wav(self):
         chosen = filedialog.askopenfilename(
@@ -198,7 +254,7 @@ class VoiceTranslatorMonitorApp:
                 self.current_voice_path = save_path
                 ok, msg = self.voice_profile.load_from_file(save_path)
                 self._refresh_voice_status_banner()
-                self.log_message(f"[ЗАПИСЬ ГОЛОСА] Готово! Профиль обновлён: {msg}", "sys_ok" if ok else "err")
+                self.log_message(f"[ЗАПИСЬ ГОЛОСА] Профиль вашего голоса обновлён: {msg}", "sys_ok" if ok else "err")
             except Exception as e:
                 self.log_message(f"[ОШИБКА ЗАПИСИ ОБРАЗЦА] {e}", "err")
         threading.Thread(target=_rec_worker, daemon=True).start()
@@ -206,11 +262,11 @@ class VoiceTranslatorMonitorApp:
     def _test_my_adapted_voice(self):
         def _test_worker():
             try:
-                test_phrase = "Hello! This is a live check of my adapted voice profile."
+                test_phrase = "Hello! Now my English voice uses a natural neural timbre matched to my real pitch and chest resonance."
                 raw_wav_path = os.path.join(tempfile.gettempdir(), "vt_gui_test_raw.wav")
                 final_wav_path = os.path.join(tempfile.gettempdir(), "vt_gui_test_final.wav")
-                self.log_message(f"[ТЕСТ ГОЛОСА] Синтез тестовой фразы с F0={self.voice_profile.target_f0:.1f} Гц и сдвигом {self.pitch_semitones.get():+.1f} пт...", "sys_info")
-                if not self.en_tts_worker.synthesize_to_wav(test_phrase, raw_wav_path):
+                self.log_message(f"[ТЕСТ ГОЛОСА] Нейронный синтез с вашим тоном F0={self.voice_profile.target_f0:.0f} Гц ({self.voice_profile.matched_neural_voice})...", "sys_info")
+                if not self.en_tts_worker.synthesize_to_wav(test_phrase, raw_wav_path, self.voice_profile, self.pitch_semitones.get()):
                     self.log_message("[ТЕСТ ГОЛОСА] Не удалось синтезировать тестовую фразу.", "err")
                     return
                 tts_data, tts_sr = sf.read(raw_wav_path, dtype="float32")
@@ -223,11 +279,11 @@ class VoiceTranslatorMonitorApp:
                 self.is_playing_speaker_echo = True
                 self.is_playing_headphone_tts = True
                 winsound.PlaySound(final_wav_path, winsound.SND_FILENAME)
-                self.log_message("[ТЕСТ ГОЛОСА] Воспроизведение завершено. При необходимости подстройте ползунок «Тон голоса».", "sys_ok")
+                self.log_message("[ТЕСТ ГОЛОСА] Готово! Вы можете выбрать другой нейронный тембр в списке или подстроить ползунок «Тон».", "sys_ok")
             except Exception as e:
                 self.log_message(f"[ОШИБКА ТЕСТА ГОЛОСА] {e}", "err")
             finally:
-                time.sleep(0.15)
+                time.sleep(0.12)
                 self.is_playing_speaker_echo = False
                 self.is_playing_headphone_tts = False
         threading.Thread(target=_test_worker, daemon=True).start()
@@ -346,14 +402,6 @@ class VoiceTranslatorMonitorApp:
     def _toggle_topmost(self):
         self.root.attributes("-topmost", self.always_on_top_var.get())
 
-    def _clear_log(self):
-        self.txt_log.configure(state=tk.NORMAL)
-        self.txt_log.delete("1.0", tk.END)
-        self.txt_log.configure(state=tk.DISABLED)
-
-    def _trigger_manual_restart(self):
-        self.force_restart_flag = True
-
     def log_message(self, text: str, tag: str = "sys_info"):
         self.ui_queue.put(("log", text, tag))
 
@@ -373,22 +421,19 @@ class VoiceTranslatorMonitorApp:
     def _update_meter_canvas(self):
         thresh = self.vad_threshold.get()
         self.canvas_mic.delete("all")
-        w_mic = min(320, int((self.mic_rms / 0.06) * 320))
-        tx = min(318, int((thresh / 0.06) * 320))
+        w_mic = min(220, int((self.mic_rms / 0.06) * 220))
+        tx = min(218, int((thresh / 0.06) * 220))
         self.canvas_mic.create_rectangle(0, 0, w_mic, 14, fill="#10B981" if self.mic_rms >= thresh else "#475569", width=0)
         self.canvas_mic.create_line(tx, 0, tx, 14, fill="#F59E0B", width=2)
-        hb_age = time.time() - self.mic_last_heartbeat
-        st = "ОК (СЛУШАЮ)" if hb_age < 2.5 else f"ПЕРЕЗАПУСК ({int(hb_age)}с)"
-        if self.whisper_model is None:
-            st = "МИКРОФОН АКТИВЕН (ЖДУ GPU)"
-        self.lbl_mic_rms.configure(text=f"RMS: {self.mic_rms:.4f} | {st}", fg="#34D399" if self.mic_rms >= thresh else "#94A3B8")
+        mic_mode_str = "АВТО ВКЛ" if self.mic_auto_translate.get() else "РУЧНОЙ (ПО КНОПКЕ)"
+        self.lbl_mic_rms.configure(text=f"RMS: {self.mic_rms:.4f} | {mic_mode_str}", fg="#34D399" if self.mic_auto_translate.get() else "#FBBF24")
 
         self.canvas_loop.delete("all")
-        w_loop = min(320, int((self.loop_rms / 0.06) * 320))
+        w_loop = min(220, int((self.loop_rms / 0.06) * 220))
         self.canvas_loop.create_rectangle(0, 0, w_loop, 14, fill="#38BDF8" if self.loop_rms >= thresh else "#475569", width=0)
         self.canvas_loop.create_line(tx, 0, tx, 14, fill="#F59E0B", width=2)
-        lst = "MUTE (ИГРАЕТ ПЕРЕВОД)" if self.is_playing_headphone_tts else "ОК (СЛУШАЮ)"
-        self.lbl_loop_rms.configure(text=f"RMS: {self.loop_rms:.4f} | {lst}")
+        loop_mode_str = "АВТО ВКЛ" if self.loopback_auto_translate.get() else "РУЧНОЙ (ПО КНОПКЕ)"
+        self.lbl_loop_rms.configure(text=f"RMS: {self.loop_rms:.4f} | {loop_mode_str}", fg="#38BDF8" if self.loopback_auto_translate.get() else "#FBBF24")
 
     def _init_models_and_workers(self):
         try:
@@ -406,13 +451,15 @@ class VoiceTranslatorMonitorApp:
             torch.set_num_threads(4)
             self.silero_model, _ = torch.hub.load(repo_or_dir="snakers4/silero-models", model="silero_tts", language="ru", speaker="v4_ru", verbose=False)
             self.silero_model.to(torch.device("cpu"))
-            self.gpu_status_text.set("ГОТОВО · МИКРОФОН АКТИВЕН · ЗАЩИТА ОТ 20 СЛОВ ВКЛ")
-            self.log_message("[ГОТОВО] Оба канала работают! Говорите в выбранный микрофон.", "sys_ok")
+            self.gpu_status_text.set("ГОТОВО · НЕЙРО-ГОЛОС АКТИВЕН · ЗАЩИТА ОТ ОТСТАВАНИЯ ВКЛ")
+            self.log_message("[ГОТОВО] Вы можете включать и отключать авто-перевод микрофона и динамика галочками в окне.", "sys_ok")
         except Exception as e:
             self.gpu_status_text.set("Ошибка инициализации моделей")
             self.log_message(f"[КРИТИЧЕСКАЯ ОШИБКА] {e}", "err")
 
     def _route_my_english_tts(self, translated_en: str):
+        if not self.mic_auto_tts.get():
+            return
         label = self.selected_mic_out_label.get()
         target_dev_idx = self.output_devices_map.get(label, -1)
         if target_dev_idx == -1:
@@ -420,7 +467,7 @@ class VoiceTranslatorMonitorApp:
         raw_wav_path = os.path.join(tempfile.gettempdir(), "vt_gui_en_raw.wav")
         final_wav_path = os.path.join(tempfile.gettempdir(), "vt_gui_en_final.wav")
         try:
-            if not self.en_tts_worker.synthesize_to_wav(translated_en, raw_wav_path):
+            if not self.en_tts_worker.synthesize_to_wav(translated_en, raw_wav_path, self.voice_profile, self.pitch_semitones.get()):
                 return
             tts_data, tts_sr = sf.read(raw_wav_path, dtype="float32")
             if tts_data.ndim > 1:
@@ -441,11 +488,56 @@ class VoiceTranslatorMonitorApp:
                     self.is_playing_headphone_tts = True
                     winsound.PlaySound(final_wav_path, winsound.SND_FILENAME)
                 finally:
-                    time.sleep(0.12)
+                    time.sleep(0.10)
                     self.is_playing_speaker_echo = False
                     self.is_playing_headphone_tts = False
         except Exception as e:
             self.log_message(f"[ОШИБКА ОЗВУЧКИ EN] {e}", "err")
+
+    def _silero_playback_worker(self):
+        """Отдельный поток воспроизведения Silero TTS без блокировки распознавания речи собеседника!"""
+        while self.running:
+            try:
+                clean_ru, raw_ru, recog_ms = self.silero_play_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+
+            # Если накопилась очередь из нескольких фраз собеседника — склеиваем их в одну и ускоряем до 1.30x, чтобы не отставать!
+            backlog = [clean_ru]
+            while not self.silero_play_queue.empty():
+                try:
+                    next_clean, _, _ = self.silero_play_queue.get_nowait()
+                    if next_clean:
+                        backlog.append(next_clean)
+                except Exception:
+                    break
+
+            combined_clean_ru = ". ".join(backlog)[:380]
+            dynamic_speed = 1.32 if len(backlog) > 1 else SILERO_SPEED_FACTOR
+
+            if not self.loopback_auto_tts.get() or self.silero_model is None:
+                continue
+
+            try:
+                audio_tensor = self.silero_model.apply_tts(
+                    text=combined_clean_ru,
+                    speaker=SILERO_SPEAKER,
+                    sample_rate=SILERO_SAMPLE_RATE,
+                    put_accent=True,
+                    put_yo=True,
+                )
+                tts_fast = speed_up_audio(audio_tensor.detach().cpu().numpy(), factor=dynamic_speed)
+                silero_path = os.path.join(tempfile.gettempdir(), "vt_gui_silero_ru.wav")
+                sf.write(silero_path, tts_fast, SILERO_SAMPLE_RATE, subtype="PCM_16")
+                try:
+                    self.is_playing_headphone_tts = True
+                    winsound.PlaySound(silero_path, winsound.SND_FILENAME)
+                finally:
+                    time.sleep(0.05)
+                    self.is_playing_headphone_tts = False
+            except Exception as e:
+                self.is_playing_headphone_tts = False
+                self.log_message(f"[ОШИБКА SILERO] {e}", "err")
 
     def _mic_worker_loop(self):
         block_sec = 0.10
@@ -463,7 +555,7 @@ class VoiceTranslatorMonitorApp:
 
                 def prim_cb(indata, frames, time_info, status):
                     self.mic_last_heartbeat = time.time()
-                    if not self.is_playing_speaker_echo and self.mic_enabled.get():
+                    if not self.is_playing_speaker_echo:
                         mic_q.put((indata.copy().flatten(), native_sr))
 
                 if sec_idx is not None and sec_idx != prim_idx:
@@ -473,7 +565,7 @@ class VoiceTranslatorMonitorApp:
                         sec_frames = max(256, int(sec_sr * block_sec))
                         def sec_cb(indata, frames, time_info, status):
                             self.mic_last_heartbeat = time.time()
-                            if not self.is_playing_speaker_echo and self.mic_enabled.get():
+                            if not self.is_playing_speaker_echo:
                                 mic_q.put((indata.copy().flatten(), sec_sr))
                         sec_stream = sd.InputStream(samplerate=sec_sr, device=sec_idx, channels=1, dtype="float32", blocksize=sec_frames, callback=sec_cb)
                         sec_stream.start()
@@ -481,10 +573,10 @@ class VoiceTranslatorMonitorApp:
                         pass
 
                 with sd.InputStream(samplerate=native_sr, device=prim_idx, channels=1, dtype="float32", blocksize=block_frames, callback=prim_cb):
-                    pre_roll = collections.deque(maxlen=2)
+                    pre_roll = collections.deque(maxlen=3)
                     speech_buffer = []
                     silence_blocks = 0
-                    max_blocks = max(12, int(PHRASE_MAX_SEC / block_sec))
+                    max_blocks = max(24, int(PHRASE_MAX_SEC / block_sec))
                     current_sr = native_sr
 
                     while self.running and not self.force_restart_flag:
@@ -492,14 +584,20 @@ class VoiceTranslatorMonitorApp:
                             chunk, chunk_sr = mic_q.get(timeout=2.0)
                             current_sr = chunk_sr
                         except queue.Empty:
-                            if self.is_playing_speaker_echo or not self.mic_enabled.get():
-                                self.mic_last_heartbeat = time.time()
-                                continue
-                            break
+                            continue
 
                         rms = float(np.sqrt(np.mean(np.square(chunk))))
                         self.mic_rms = rms
                         thresh = self.vad_threshold.get()
+
+                        # Если авто-перевод микрофона ВЫКЛЮЧЕН и кнопка не нажата — не копим и не переводим автоматически
+                        if not self.mic_auto_translate.get() and not self.manual_mic_trigger:
+                            if rms >= thresh:
+                                speech_buffer.append(chunk)
+                                if len(speech_buffer) > 50:
+                                    speech_buffer.pop(0)
+                            continue
+
                         if rms >= thresh:
                             if len(speech_buffer) == 0 and len(pre_roll) > 0:
                                 speech_buffer.extend(pre_roll)
@@ -513,25 +611,32 @@ class VoiceTranslatorMonitorApp:
                             else:
                                 pre_roll.append(chunk)
 
-                        if len(speech_buffer) >= 4 and (silence_blocks >= 3 or len(speech_buffer) >= max_blocks):
+                        should_flush = (
+                            self.manual_mic_trigger
+                            or (len(speech_buffer) >= 4 and (silence_blocks >= 4 or len(speech_buffer) >= max_blocks))
+                        )
+                        if should_flush and len(speech_buffer) >= 2:
+                            self.manual_mic_trigger = False
                             raw_audio = np.concatenate(speech_buffer)
                             speech_buffer.clear()
                             silence_blocks = 0
                             if self.whisper_model is None:
                                 continue
-                            if float(np.sqrt(np.mean(np.square(raw_audio)))) < thresh * 0.75:
+                            if float(np.sqrt(np.mean(np.square(raw_audio)))) < thresh * 0.70:
                                 continue
 
                             audio_16k = resample_linear(raw_audio, current_sr, 16000)
                             dur_sec = len(audio_16k) / 16000.0
-                            max_tokens = max(8, min(60, int(dur_sec * 10)))
+                            max_tokens = max(10, min(75, int(dur_sec * 11)))
                             t_start = time.perf_counter()
+                            prompt_ru = TRANSLATOR.prev_ru_context[-110:] if TRANSLATOR.prev_ru_context else None
                             with self.gpu_lock:
                                 segments, _ = self.whisper_model.transcribe(
                                     audio_16k, language="ru", task="transcribe", beam_size=1, best_of=1,
                                     temperature=0.0, without_timestamps=False, repetition_penalty=1.35,
                                     no_repeat_ngram_size=2, compression_ratio_threshold=1.8, log_prob_threshold=-0.8,
-                                    no_speech_threshold=0.6, max_new_tokens=max_tokens, vad_filter=False, condition_on_previous_text=False,
+                                    no_speech_threshold=0.6, max_new_tokens=max_tokens, vad_filter=False,
+                                    condition_on_previous_text=False, initial_prompt=prompt_ru,
                                 )
                                 valid_segs = [
                                     seg.text.strip() for seg in segments
@@ -541,7 +646,7 @@ class VoiceTranslatorMonitorApp:
 
                             if not recognized_ru or is_hallucination_ru(recognized_ru):
                                 continue
-                            translated_en = TRANSLATOR.translate(recognized_ru, src="ru", dst="en")
+                            translated_en = TRANSLATOR.translate(recognized_ru, src="ru", dst="en", use_context=False)
                             latency_ms = int((time.perf_counter() - t_start) * 1000)
                             ts = time.strftime("%H:%M:%S")
                             self.log_message(f"[{ts}] ВЫ (RU): {recognized_ru}", "ru_you")
@@ -565,6 +670,7 @@ class VoiceTranslatorMonitorApp:
                         pass
 
     def _loopback_worker_loop(self):
+        """Неблокирующий поток распознавания собеседника с сохранением смысла предложений и правильным переводом годов."""
         while self.running:
             try:
                 with pyaudio.PyAudio() as p:
@@ -583,20 +689,21 @@ class VoiceTranslatorMonitorApp:
                     loop_q: "queue.Queue[bytes]" = queue.Queue()
 
                     def loop_cb(in_data, frame_count, time_info, status):
-                        if not self.is_playing_headphone_tts and self.loopback_enabled.get():
+                        if not self.is_playing_headphone_tts:
                             loop_q.put(in_data)
                         return (in_data, pyaudio.paContinue)
 
                     stream = p.open(format=pyaudio.paFloat32, channels=channels, rate=sr, frames_per_buffer=chunk_frames, input=True, input_device_index=loopback_dev["index"], stream_callback=loop_cb)
                     stream.start_stream()
-                    pre_roll = collections.deque(maxlen=2)
+                    pre_roll = collections.deque(maxlen=3)
                     speech_buf = []
                     silence_blocks = 0
-                    max_blocks = max(14, int(PHRASE_MAX_SEC / block_sec))
+                    # Даём собеседнику договорить смысловую фразу до 3.6 сек (или до паузы 0.35 сек), чтобы не рвать смысл слов!
+                    max_blocks = max(28, int(PHRASE_MAX_SEC / block_sec))
 
                     while self.running and stream.is_active() and not self.force_restart_flag:
                         try:
-                            data = loop_q.get(timeout=0.4)
+                            data = loop_q.get(timeout=0.35)
                         except queue.Empty:
                             self.loop_rms = 0.0
                             if len(speech_buf) >= 4:
@@ -610,6 +717,15 @@ class VoiceTranslatorMonitorApp:
                             rms = float(np.sqrt(np.mean(np.square(arr))))
                             self.loop_rms = rms
                             thresh = self.vad_threshold.get()
+
+                            # Если авто-перевод динамика ВЫКЛЮЧЕН и не нажата кнопка — просто храним последние 4 секунды в буфере
+                            if not self.loopback_auto_translate.get() and not self.manual_loop_trigger:
+                                if rms >= thresh:
+                                    speech_buf.append(arr)
+                                    if len(speech_buf) > 45:
+                                        speech_buf.pop(0)
+                                continue
+
                             if rms >= thresh:
                                 if len(speech_buf) == 0 and len(pre_roll) > 0:
                                     speech_buf.extend(pre_roll)
@@ -623,24 +739,32 @@ class VoiceTranslatorMonitorApp:
                                 else:
                                     pre_roll.append(arr)
 
-                        if len(speech_buf) >= 4 and (silence_blocks >= 3 or len(speech_buf) >= max_blocks):
+                        should_flush = (
+                            self.manual_loop_trigger
+                            or (len(speech_buf) >= 4 and (silence_blocks >= 4 or len(speech_buf) >= max_blocks))
+                        )
+                        if should_flush and len(speech_buf) >= 2:
+                            self.manual_loop_trigger = False
                             full_audio = np.concatenate(speech_buf)
                             speech_buf.clear()
                             silence_blocks = 0
                             if self.whisper_model is None:
                                 continue
-                            if float(np.sqrt(np.mean(np.square(full_audio)))) < self.vad_threshold.get() * 0.75:
+                            if float(np.sqrt(np.mean(np.square(full_audio)))) < self.vad_threshold.get() * 0.70:
                                 continue
+
                             audio_16k = resample_linear(full_audio, sr, 16000)
                             dur_sec = len(audio_16k) / 16000.0
-                            max_tokens = max(8, min(65, int(dur_sec * 11)))
+                            max_tokens = max(10, min(80, int(dur_sec * 12)))
                             t0 = time.perf_counter()
+                            prompt_en = TRANSLATOR.prev_en_context[-110:] if TRANSLATOR.prev_en_context else None
                             with self.gpu_lock:
                                 segments, _ = self.whisper_model.transcribe(
                                     audio_16k, language="en", task="transcribe", beam_size=1, best_of=1,
                                     temperature=0.0, without_timestamps=False, repetition_penalty=1.35,
                                     no_repeat_ngram_size=2, compression_ratio_threshold=1.8, log_prob_threshold=-0.8,
-                                    no_speech_threshold=0.6, max_new_tokens=max_tokens, vad_filter=False, condition_on_previous_text=False,
+                                    no_speech_threshold=0.6, max_new_tokens=max_tokens, vad_filter=False,
+                                    condition_on_previous_text=False, initial_prompt=prompt_en,
                                 )
                                 valid_segs = [
                                     seg.text.strip() for seg in segments
@@ -650,30 +774,17 @@ class VoiceTranslatorMonitorApp:
 
                             if not english_text or is_hallucination_en(english_text):
                                 continue
-                            russian_text = TRANSLATOR.translate(english_text, src="en", dst="ru")
+                            russian_text = TRANSLATOR.translate(english_text, src="en", dst="ru", use_context=True)
                             clean_ru = sanitize_for_silero(russian_text or "")
                             if not clean_ru:
                                 continue
+                            recog_ms = int((time.perf_counter() - t0) * 1000)
                             ts = time.strftime("%H:%M:%S")
                             self.log_message(f"[{ts}] СОБЕСЕДНИК (EN): {english_text}", "en_peer")
-                            if self.silero_model is not None:
-                                audio_tensor = self.silero_model.apply_tts(text=clean_ru, speaker=SILERO_SPEAKER, sample_rate=SILERO_SAMPLE_RATE, put_accent=True, put_yo=True)
-                                tts_fast = speed_up_audio(audio_tensor.detach().cpu().numpy(), factor=SILERO_SPEED_FACTOR)
-                                total_ms = int((time.perf_counter() - t0) * 1000)
-                                self.log_message(f"           SILERO (RU) [{total_ms} мс]: {russian_text}", "ru_silero")
-                                silero_path = os.path.join(tempfile.gettempdir(), "vt_gui_silero_ru.wav")
-                                sf.write(silero_path, tts_fast, SILERO_SAMPLE_RATE, subtype="PCM_16")
-                                try:
-                                    self.is_playing_headphone_tts = True
-                                    winsound.PlaySound(silero_path, winsound.SND_FILENAME)
-                                finally:
-                                    time.sleep(0.08)
-                                    while not loop_q.empty():
-                                        try:
-                                            loop_q.get_nowait()
-                                        except Exception:
-                                            break
-                                    self.is_playing_headphone_tts = False
+                            self.log_message(f"           ПЕРЕВОД (RU) [{recog_ms} мс]: {russian_text}", "ru_silero")
+                            # Отправляем в асинхронную очередь озвучки — распознавание следующей фразы собеседника НЕ ЖДЁТ окончания звука!
+                            self.silero_play_queue.put((clean_ru, russian_text, recog_ms))
+
                     stream.stop_stream()
                     stream.close()
             except Exception as e:
@@ -683,13 +794,31 @@ class VoiceTranslatorMonitorApp:
 
 
 def main():
-    root = tk.Tk()
-    app = VoiceTranslatorMonitorApp(root)
-    def on_close():
-        app.running = False
-        root.destroy()
-    root.protocol("WM_DELETE_WINDOW", on_close)
-    root.mainloop()
+    print("=" * 72)
+    print(" VoiceTranslator Monitor v2.4 (RTX 5070 Ti) — Desktop GUI")
+    print(f" Python: {sys.version.split()[0]} | Platform: {sys.platform}")
+    print("=" * 72)
+    try:
+        root = tk.Tk()
+        app = VoiceTranslatorMonitorApp(root)
+        def on_close():
+            app.running = False
+            root.destroy()
+        root.protocol("WM_DELETE_WINDOW", on_close)
+        print("[VoiceTranslator] Tkinter window initialized successfully.")
+        root.mainloop()
+    except Exception as e:
+        print("")
+        print("!" * 72)
+        print(f"[FATAL STARTUP ERROR]: {e}")
+        import traceback
+        traceback.print_exc()
+        print("!" * 72)
+        try:
+            input("Нажмите ENTER для выхода из консоли...")
+        except Exception:
+            pass
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

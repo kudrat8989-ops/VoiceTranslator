@@ -2,10 +2,14 @@ import React, { useState, useMemo } from "react";
 import { ProjectConfig, ScriptFileKey } from "./types/translator";
 import { DEFAULT_CONFIG } from "./constants/defaultConfig";
 import { getAllGeneratedFiles } from "./utils/scriptGenerators";
-import { buildOneClickPcUpdaterBat } from "./utils/pcUpdaterBuilder";
+import {
+  buildOneClickPcUpdaterBat,
+  buildCleanFromScratchUnpackerBat,
+} from "./utils/pcUpdaterBuilder";
 import { buildZipBlob } from "./utils/zipBuilder";
 import { HeaderNav, AppSection } from "./components/HeaderNav";
 import { ReleaseHighlightsBanner } from "./components/ReleaseHighlightsBanner";
+import { CleanInstallChecklist } from "./components/CleanInstallChecklist";
 import { QuickVoiceAndMicPanel } from "./components/QuickVoiceAndMicPanel";
 import { CodeViewerPanel } from "./components/CodeViewerPanel";
 import { ConfigSection } from "./components/ConfigSection";
@@ -13,7 +17,7 @@ import { LiveBrowserTranslator } from "./components/LiveBrowserTranslator";
 
 export default function App() {
   const [config, setConfig] = useState<ProjectConfig>(DEFAULT_CONFIG);
-  const [selectedFile, setSelectedFile] = useState<ScriptFileKey>("translator_gui.py");
+  const [selectedFile, setSelectedFile] = useState<ScriptFileKey>("step1_clean.bat");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<AppSection>("plan");
 
@@ -56,7 +60,7 @@ export default function App() {
     const url = URL.createObjectURL(zipBlob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "VoiceTranslator_v2_3_VoiceStudio_AntiRepeat.zip";
+    a.download = "VoiceTranslator_v2_3_CleanInstall.zip";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -72,11 +76,26 @@ export default function App() {
       />
 
       <main className="flex-1 max-w-[1360px] w-full mx-auto px-6 py-8 space-y-8">
+        <CleanInstallChecklist
+          projectDir={config.projectDir}
+          onDownloadUnpackerBat={() =>
+            handleDownloadFile(
+              "unpack_from_zero.bat",
+              buildCleanFromScratchUnpackerBat(config, generatedFiles)
+            )
+          }
+          onSelectAndDownloadStep={(fileKey) => {
+            setSelectedFile(fileKey);
+            handleDownloadFile(fileKey, generatedFiles[fileKey]);
+          }}
+        />
+
         <ReleaseHighlightsBanner
           projectDir={config.projectDir}
+          onDownloadAllZip={handleDownloadZip}
           onDownloadPcUpdaterBat={() =>
             handleDownloadFile(
-              "update_pc_v2_3.bat",
+              "update_pc_v2_4.bat",
               buildOneClickPcUpdaterBat(config, generatedFiles)
             )
           }
