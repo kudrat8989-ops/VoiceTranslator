@@ -15,9 +15,9 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   onDownloadZip,
 }) => {
   const navItems: { id: AppSection; label: string }[] = [
-    { id: "plan", label: "Образец голоса и Защита от 20 слов (v2.3)" },
+    { id: "plan", label: "Управление авто-переводом и голос (v2.4)" },
     { id: "config", label: "Настройки голоса и микрофонов" },
-    { id: "scripts", label: "Все 12 файлов" },
+    { id: "scripts", label: "Все 13 файлов" },
     { id: "live", label: "Веб-стенд и проверка микрофона" },
   ];
 
@@ -58,7 +58,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
           className="px-3.5 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg transition-colors whitespace-nowrap flex items-center gap-2"
         >
           <FolderArchive className="w-3.5 h-3.5" />
-          <span>Скачать ZIP v2.3 (Свой голос + Анти-Повтор)</span>
+          <span>Скачать VoiceTranslator_v2.4.zip</span>
         </button>
       </div>
     </header>

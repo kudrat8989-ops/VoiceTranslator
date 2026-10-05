@@ -24,6 +24,7 @@ export const DEFAULT_CONFIG: ProjectConfig = {
   phraseDurationSec: 1.8,
   deleteMyVoiceWav: false,
   alwaysOnTopGui: true,
+  hearMyEnglishInHeadphones: true,
 };
 
 export const ALL_FILE_KEYS: ScriptFileKey[] = [

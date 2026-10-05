@@ -31,6 +31,7 @@ export interface ProjectConfig {
   phraseDurationSec: number;
   deleteMyVoiceWav: boolean;
   alwaysOnTopGui: boolean;
+  hearMyEnglishInHeadphones: boolean;
 }
 
 export interface StepCompletionState {

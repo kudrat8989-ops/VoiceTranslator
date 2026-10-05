@@ -1,0 +1,83 @@
+export function generateGuiLayout(): string {
+  return `
+    def _build_ui(self):
+        top = tk.Frame(self.root, bg="#111726", padx=12, pady=6)
+        top.pack(fill=tk.X, padx=10, pady=(8, 4))
+        tk.Label(top, text="VOICETRANSLATOR v2.4 (RTX 5070 Ti)", bg="#111726", fg="#F8FAFC", font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT)
+        tk.Checkbutton(top, text="Поверх всех окон", variable=self.always_on_top_var, command=lambda: self.root.attributes("-topmost", self.always_on_top_var.get()), bg="#111726", fg="#CBD5E1", selectcolor="#0B0F17", activebackground="#111726", font=("Segoe UI", 8)).pack(side=tk.RIGHT, padx=6)
+        tk.Label(top, textvariable=self.gpu_status_text, bg="#111726", fg="#34D399", font=("Consolas", 9, "bold")).pack(side=tk.RIGHT, padx=12)
+
+        dev_box = tk.Frame(self.root, bg="#111726", padx=12, pady=6, highlightbackground="#334155", highlightthickness=1)
+        dev_box.pack(fill=tk.X, padx=10, pady=3)
+        r1 = tk.Frame(dev_box, bg="#111726")
+        r1.pack(fill=tk.X, pady=2)
+        tk.Label(r1, text="Микрофон (Вход):", bg="#111726", fg="#34D399", font=("Segoe UI", 9, "bold"), width=18, anchor="w").pack(side=tk.LEFT)
+        self.combo_mic = ttk.Combobox(r1, textvariable=self.selected_primary_mic_label, state="readonly", width=48)
+        self.combo_mic.pack(side=tk.LEFT, padx=4)
+        self.combo_mic.bind("<<ComboboxSelected>>", lambda e: setattr(self, "force_restart_flag", True))
+        tk.Button(r1, text="Обновить устройства", command=self._scan_audio_devices, bg="#1E293B", fg="#E2E8F0", relief=tk.FLAT, padx=6, pady=1, font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=6)
+
+        r2 = tk.Frame(dev_box, bg="#111726")
+        r2.pack(fill=tk.X, pady=2)
+        tk.Label(r2, text="Вывод перевода EN:", bg="#111726", fg="#38BDF8", font=("Segoe UI", 9, "bold"), width=18, anchor="w").pack(side=tk.LEFT)
+        self.combo_out = ttk.Combobox(r2, textvariable=self.selected_mic_out_label, state="readonly", width=48)
+        self.combo_out.pack(side=tk.LEFT, padx=4)
+
+        voice_box = tk.Frame(self.root, bg="#111726", padx=12, pady=6, highlightbackground="#F59E0B", highlightthickness=1)
+        voice_box.pack(fill=tk.X, padx=10, pady=3)
+        vr1 = tk.Frame(voice_box, bg="#111726")
+        vr1.pack(fill=tk.X)
+        tk.Label(vr1, textvariable=self.voice_status_text, bg="#111726", fg="#FBBF24", font=("Consolas", 9)).pack(side=tk.LEFT)
+        tk.Button(vr1, text="🔬 Анализ голоса", command=self._show_voice_analyzer_window, bg="#4F46E5", fg="#FFF", relief=tk.FLAT, padx=8, pady=1, font=("Segoe UI", 8, "bold")).pack(side=tk.RIGHT, padx=4)
+        tk.Button(vr1, text="Тест голоса", command=self._test_voice, bg="#059669", fg="#FFF", relief=tk.FLAT, padx=8, pady=1, font=("Segoe UI", 8, "bold")).pack(side=tk.RIGHT, padx=4)
+        tk.Button(vr1, text="Записать 4 сек", command=self._record_sample, bg="#D97706", fg="#FFF", relief=tk.FLAT, padx=8, pady=1, font=("Segoe UI", 8, "bold")).pack(side=tk.RIGHT, padx=4)
+        tk.Button(vr1, text="Выбрать .wav", command=self._browse_sample, bg="#334155", fg="#FFF", relief=tk.FLAT, padx=8, pady=1, font=("Segoe UI", 8)).pack(side=tk.RIGHT, padx=4)
+
+        vr2 = tk.Frame(voice_box, bg="#111726")
+        vr2.pack(fill=tk.X, pady=(4, 0))
+        tk.Label(vr2, text="Нейро-голос:", bg="#111726", fg="#CBD5E1", font=("Segoe UI", 8)).pack(side=tk.LEFT)
+        self.combo_neural = ttk.Combobox(vr2, textvariable=self.selected_neural_voice_label, values=list(NEURAL_VOICES.keys()), state="readonly", width=30)
+        self.combo_neural.pack(side=tk.LEFT, padx=4)
+        self.combo_neural.bind("<<ComboboxSelected>>", lambda e: setattr(self.en_tts_worker, "selected_voice_override", NEURAL_VOICES.get(self.selected_neural_voice_label.get(), "auto")))
+
+        tk.Label(vr2, text="VAD:", bg="#111726", fg="#CBD5E1", font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(10, 2))
+        tk.Scale(vr2, from_=0.001, to=0.020, resolution=0.001, orient=tk.HORIZONTAL, variable=self.vad_threshold, bg="#111726", fg="#38BDF8", highlightthickness=0, troughcolor="#0B0F17", length=100).pack(side=tk.LEFT)
+        tk.Label(vr2, text="Тон:", bg="#111726", fg="#CBD5E1", font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(10, 2))
+        tk.Scale(vr2, from_=-6.0, to=6.0, resolution=0.5, orient=tk.HORIZONTAL, variable=self.pitch_semitones, bg="#111726", fg="#FBBF24", highlightthickness=0, troughcolor="#0B0F17", length=90).pack(side=tk.LEFT)
+
+        ctl = tk.Frame(self.root, bg="#111726", padx=12, pady=6, highlightbackground="#334155", highlightthickness=1)
+        ctl.pack(fill=tk.X, padx=10, pady=3)
+
+        cm = tk.Frame(ctl, bg="#111726")
+        cm.pack(fill=tk.X, pady=3)
+        tk.Checkbutton(cm, text="АВТО-ПЕРЕВОД МИКРОФОНА (RU -> EN)", variable=self.mic_auto_translate, bg="#111726", fg="#34D399", selectcolor="#0B0F17", activebackground="#111726", font=("Segoe UI", 9, "bold"), width=34, anchor="w").pack(side=tk.LEFT)
+        self.canv_mic = tk.Canvas(cm, width=130, height=12, bg="#0B0F17", highlightthickness=1, highlightbackground="#1E293B")
+        self.canv_mic.pack(side=tk.LEFT, padx=4)
+        self.lbl_mic = tk.Label(cm, text="RMS: 0.0000", bg="#111726", fg="#94A3B8", font=("Consolas", 8), width=16, anchor="w")
+        self.lbl_mic.pack(side=tk.LEFT)
+        tk.Checkbutton(cm, text="Озвучивать EN", variable=self.mic_auto_tts, bg="#111726", fg="#CBD5E1", selectcolor="#0B0F17", activebackground="#111726", font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=4)
+        tk.Checkbutton(cm, text="🎧 Слышать свой EN", variable=self.mic_monitor_in_headphones, bg="#111726", fg="#FBBF24", selectcolor="#0B0F17", activebackground="#111726", font=("Segoe UI", 8, "bold")).pack(side=tk.LEFT, padx=4)
+        self.btn_replay_en = tk.Button(cm, text="🔊 Слушать мой перевод EN", command=self._replay_last_my_en, bg="#1E293B", fg="#FBBF24", relief=tk.FLAT, padx=6, pady=1, font=("Segoe UI", 8, "bold"))
+        self.btn_replay_en.pack(side=tk.LEFT, padx=3)
+        tk.Button(cm, text="Перевести сейчас", command=lambda: setattr(self, "manual_mic_trigger", True), bg="#059669", fg="#FFF", relief=tk.FLAT, padx=6, pady=1, font=("Segoe UI", 8, "bold")).pack(side=tk.RIGHT)
+
+        cl = tk.Frame(ctl, bg="#111726")
+        cl.pack(fill=tk.X, pady=3)
+        tk.Checkbutton(cl, text="АВТО-ПЕРЕВОД ДИНАМИКА (EN -> RU)", variable=self.loopback_auto_translate, bg="#111726", fg="#38BDF8", selectcolor="#0B0F17", activebackground="#111726", font=("Segoe UI", 9, "bold"), width=34, anchor="w").pack(side=tk.LEFT)
+        self.canv_loop = tk.Canvas(cl, width=130, height=12, bg="#0B0F17", highlightthickness=1, highlightbackground="#1E293B")
+        self.canv_loop.pack(side=tk.LEFT, padx=4)
+        self.lbl_loop = tk.Label(cl, text="RMS: 0.0000", bg="#111726", fg="#94A3B8", font=("Consolas", 8), width=16, anchor="w")
+        self.lbl_loop.pack(side=tk.LEFT)
+        tk.Checkbutton(cl, text="Озвучивать в уши (Silero)", variable=self.loopback_auto_tts, command=self._on_tts_mode_toggled, bg="#111726", fg="#CBD5E1", selectcolor="#0B0F17", activebackground="#111726", font=("Segoe UI", 8, "bold")).pack(side=tk.LEFT, padx=4)
+        self.btn_tts_toggle = tk.Button(cl, text="🔊 Озвучка ВКЛ", command=self._toggle_peer_tts, bg="#1E293B", fg="#38BDF8", relief=tk.FLAT, padx=6, pady=1, font=("Segoe UI", 8, "bold"))
+        self.btn_tts_toggle.pack(side=tk.LEFT, padx=3)
+        tk.Button(cl, text="Перевести сейчас", command=lambda: setattr(self, "manual_loop_trigger", True), bg="#0284C7", fg="#FFF", relief=tk.FLAT, padx=6, pady=1, font=("Segoe UI", 8, "bold")).pack(side=tk.RIGHT)
+
+        log_f = tk.Frame(self.root, bg="#0B0F17", padx=10, pady=4)
+        log_f.pack(fill=tk.BOTH, expand=True)
+        self.txt_log = scrolledtext.ScrolledText(log_f, bg="#080B11", fg="#E2E8F0", insertbackground="#FFF", font=("Consolas", 10), wrap=tk.WORD, state=tk.DISABLED)
+        self.txt_log.pack(fill=tk.BOTH, expand=True)
+        for tag, col in [("sys_ok", "#34D399"), ("sys_info", "#94A3B8"), ("ru_you", "#F8FAFC"), ("en_out", "#34D399"), ("en_peer", "#38BDF8"), ("ru_silero", "#C084FC"), ("ru_reading", "#FBBF24"), ("err", "#F87171")]:
+            self.txt_log.tag_config(tag, foreground=col)
+`;
+}

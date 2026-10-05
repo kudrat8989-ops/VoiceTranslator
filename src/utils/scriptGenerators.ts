@@ -25,7 +25,7 @@ export function generateVtDspCorePy(config: ProjectConfig): string {
 export function generateTranslatorGuiPy(config: ProjectConfig): string {
   const header = `# -*- coding: utf-8 -*-
 """
-VoiceTranslator Monitor GUI v2.3 — Главное окно приложения
+VoiceTranslator Monitor GUI v2.4 — Главное окно приложения
 Автоматически импортирует ядро vt_dsp_core.py (при наличии) или использует встроенный модуль.
 """
 try:
