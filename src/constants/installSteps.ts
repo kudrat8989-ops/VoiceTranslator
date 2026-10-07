@@ -17,8 +17,8 @@ export const INSTALL_STEPS: InstallStepItem[] = [
   {
     step: "ШАГ 2.1",
     file: "step2_1_create_venv.bat",
-    title: "Создание чистого виртуального окружения venv",
-    desc: "Находит установленный Python 3.10+, создаёт папку venv\\Scripts\\python.exe и обновляет pip/wheel.",
+    title: "Авто-поиск Python 3.10+ и создание venv",
+    desc: "Умный поиск: проверяет PATH, py launcher, реестр и AppData. Если Python нет — предлагает установку в 1 клик через winget.",
   },
   {
     step: "ШАГ 2.2",

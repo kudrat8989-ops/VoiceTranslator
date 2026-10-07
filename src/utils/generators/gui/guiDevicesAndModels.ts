@@ -9,28 +9,20 @@ export function generateGuiDevicesAndModels(): string {
             while True:
                 item = self.ui_queue.get_nowait()
                 if item[0] == "log":
-                    _, text, tag = item
                     self.txt_log.config(state=tk.NORMAL)
-                    if float(self.txt_log.index("end-1c").split(".")[0]) > 400:
-                        self.txt_log.delete("1.0", "60.0")
-                    self.txt_log.insert(tk.END, text + "\\n", tag)
-                    self.txt_log.see(tk.END)
-                    self.txt_log.config(state=tk.DISABLED)
+                    if float(self.txt_log.index("end-1c").split(".")[0]) > 400: self.txt_log.delete("1.0", "60.0")
+                    self.txt_log.insert(tk.END, item[1] + "\\n", item[2]); self.txt_log.see(tk.END); self.txt_log.config(state=tk.DISABLED)
                 elif item[0] == "rms":
                     _, m_rms, l_rms = item
-                    self.lbl_mic.config(text=f"RMS: {m_rms:.4f}")
-                    self.canv_mic.delete("all")
+                    self.lbl_mic.config(text=f"RMS: {m_rms:.4f}"); self.canv_mic.delete("all")
                     self.canv_mic.create_rectangle(0, 0, min(130, int(m_rms * 1300)), 12, fill="#34D399", width=0)
-                    self.lbl_loop.config(text=f"RMS: {l_rms:.4f}")
-                    self.canv_loop.delete("all")
+                    self.lbl_loop.config(text=f"RMS: {l_rms:.4f}"); self.canv_loop.delete("all")
                     self.canv_loop.create_rectangle(0, 0, min(130, int(l_rms * 1300)), 12, fill="#38BDF8", width=0)
         except queue.Empty: pass
         if self.running: self.root.after(30, self._poll_ui_queue)
 
     def _memory_watchdog(self):
-        while self.running:
-            time.sleep(45)
-            gc.collect()
+        while self.running: time.sleep(45); gc.collect()
 
     def _scan_audio_devices(self):
         try: devs, apis = sd.query_devices(), sd.query_hostapis()
@@ -72,11 +64,20 @@ export function generateGuiDevicesAndModels(): string {
             self.log_message("[ГОЛОС] " + self.voice_status_text.get(), "sys_ok" if self.voice_profile.loaded else "sys_info")
             t0 = time.perf_counter()
             self.gpu_status_text.set(f"Загрузка Faster-Whisper ({WHISPER_MODEL_SIZE})...")
-            self.whisper_model = WhisperModel(WHISPER_MODEL_SIZE, device="cuda", compute_type=COMPUTE_TYPE)
-            dummy = np.zeros(16000, dtype=np.float32)
-            with self.gpu_lock:
-                list(self.whisper_model.transcribe(dummy, language="ru", beam_size=1, without_timestamps=False, vad_filter=False)[0])
-            self.log_message(f"[GPU] Faster-Whisper готов за {time.perf_counter() - t0:.2f} сек.", "sys_ok")
+            loaded = False
+            for ct in ["float32", "float16", "bfloat16"]:
+                try:
+                    wm = WhisperModel(WHISPER_MODEL_SIZE, device="cuda", compute_type=ct)
+                    dummy = np.zeros(16000, dtype=np.float32)
+                    with self.gpu_lock:
+                        list(wm.transcribe(dummy, language="ru", beam_size=1, without_timestamps=False, vad_filter=False)[0])
+                    self.whisper_model = wm
+                    self.log_message(f"[GPU] Faster-Whisper готов на CUDA ({ct}) за {time.perf_counter() - t0:.2f} с.", "sys_ok")
+                    loaded = True; break
+                except Exception as ex: self.log_message(f"[CUDA {ct}]: {ex}", "sys_info")
+            if not loaded:
+                self.whisper_model = WhisperModel(WHISPER_MODEL_SIZE, device="cpu", compute_type="int8")
+                self.log_message("[GPU] Запущен CPU fallback", "sys_ok")
 
             self.gpu_status_text.set("Загрузка Silero TTS...")
             torch.set_num_threads(4)
@@ -92,7 +93,6 @@ export function generateGuiDevicesAndModels(): string {
         if self.voice_profile.loaded:
             fn = os.path.basename(self.voice_profile.wav_path)
             self.voice_status_text.set(f"{fn} | [{self.voice_profile.voice_type_title}] F0={self.voice_profile.target_f0:.0f} Гц ({self.voice_profile.pitch_note}) -> {self.voice_profile.matched_neural_voice}")
-        else:
-            self.voice_status_text.set("Образец не подключён — запишите 4 сек или выберите .wav")
+        else: self.voice_status_text.set("Образец не подключён — запишите 4 сек или выберите .wav")
 `;
 }

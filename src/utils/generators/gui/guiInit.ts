@@ -13,7 +13,8 @@ class VoiceTranslatorMonitorApp:
         self.root.title("VoiceTranslator Monitor v2.4 (RTX 5070 Ti)")
         self.root.geometry("820x840")
         self.root.configure(bg="#0B0F17")
-        self.root.attributes("-topmost", ${alwaysOnTop})
+        try: self.root.attributes("-topmost", ${alwaysOnTop})
+        except Exception: pass
 
         self.running = True
         self.mic_auto_translate = tk.BooleanVar(value=True)
@@ -58,7 +59,10 @@ class VoiceTranslatorMonitorApp:
         self._refresh_voice_banner()
         self._scan_audio_devices()
         self._poll_ui_queue()
+        self.root.after(350, self._start_background_workers)
 
+    def _start_background_workers(self):
+        print("[VoiceTranslator] Запуск фоновых аудио-потоков...")
         threading.Thread(target=self._mic_worker_loop, daemon=True).start()
         threading.Thread(target=self._loopback_worker_loop, daemon=True).start()
         threading.Thread(target=self._silero_playback_worker, daemon=True).start()

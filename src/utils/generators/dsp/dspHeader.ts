@@ -7,7 +7,7 @@ export function generateDspHeader(config: ProjectConfig): string {
 
   return `# -*- coding: utf-8 -*-
 """VoiceTranslator v2.4 Core DSP & Translation Engine (vt_dsp_core.py)"""
-import os, sys, re, json, time, queue, asyncio, threading, tempfile, warnings, http.client, urllib.parse
+import os, sys, re, json, time, queue, asyncio, threading, tempfile, warnings, http.client, urllib.parse, collections
 from pathlib import Path
 try: import winsound
 except Exception: winsound = None
@@ -17,6 +17,8 @@ try:
 except Exception: tk = None
 
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+os.environ["CUDA_FORCE_PTX_JIT"] = "1"
+os.environ["TORCH_CUDA_ARCH_LIST"] = "12.0;9.0;8.9;8.6"
 warnings.filterwarnings("ignore")
 
 def safe_play_wav(path: str, async_mode: bool = False) -> bool:
@@ -29,14 +31,17 @@ def safe_play_wav(path: str, async_mode: bool = False) -> bool:
     return False
 
 def register_cuda_dlls():
-    p = Path(sys.prefix) / "Lib" / "site-packages" / "nvidia"
-    if p.exists():
-        for b in p.glob("*/bin"):
-            if b.is_dir():
-                try:
-                    os.add_dll_directory(str(b.resolve()))
-                    os.environ["PATH"] = str(b.resolve()) + os.pathsep + os.environ.get("PATH", "")
-                except Exception: pass
+    dirs = [
+        Path(sys.prefix) / "Lib" / "site-packages" / "nvidia" / "cublas" / "bin",
+        Path(sys.prefix) / "Lib" / "site-packages" / "nvidia" / "cudnn" / "bin",
+        Path(sys.prefix) / "Lib" / "site-packages" / "torch" / "lib",
+    ]
+    for p in dirs:
+        if p.exists():
+            try:
+                os.add_dll_directory(str(p.resolve()))
+                os.environ["PATH"] = str(p.resolve()) + os.pathsep + os.environ.get("PATH", "")
+            except Exception: pass
 
 register_cuda_dlls()
 

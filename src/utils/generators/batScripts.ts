@@ -1,11 +1,14 @@
 export {
   generateRequirementsTxt,
   generateStep1CleanBat,
-  generateStep2VenvBat,
-  generateStep2VenvBat as generateStep2_1CreateVenvBat,
   generateStep3CheckAudioBat,
   generateStep5InstallVbCableBat,
 } from "./bat/setupStepsBat";
+
+export {
+  generateStep2VenvBat,
+  generateStep2VenvBat as generateStep2_1CreateVenvBat,
+} from "./bat/step2VenvBat";
 
 export {
   generateStep2PytorchBat,

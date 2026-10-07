@@ -11,7 +11,7 @@ export const DEFAULT_CONFIG: ProjectConfig = {
   loopbackDeviceIndex: null,
   loopbackBackend: "pyaudiowpatch",
   whisperModel: "large-v3-turbo",
-  computeType: "float16",
+  computeType: "float32",
   micTtsMode: "mywo_adapted",
   micOutputRoute: "auto_vbcable_or_mute",
   voiceSampleFile: "mywo.wav",

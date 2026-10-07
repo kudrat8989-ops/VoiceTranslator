@@ -1,6 +1,6 @@
 export type CudaProfile = "pt251_cu121" | "pt260_cu128";
 export type WhisperModelSize = "large-v3-turbo" | "medium" | "small" | "base";
-export type ComputeType = "float16" | "int8_float16" | "int8";
+export type ComputeType = "float32" | "float16" | "bfloat16" | "int8_float16" | "int8";
 export type MicTtsMode = "mywo_adapted" | "pyttsx3" | "text_only";
 export type MicOutputRoute = "auto_vbcable_or_mute" | "vbcable_only" | "mute_local" | "local_headphones";
 export type SileroSpeaker = "aidar" | "baya" | "kseniya" | "xenia" | "eugene";
@@ -49,6 +49,7 @@ export interface StepCompletionState {
 export type ScriptFileKey =
   | "translator_gui.py"
   | "vt_dsp_core.py"
+  | "README.md"
   | "step5_install_vbcable.bat"
   | "run.bat"
   | "translator_mic.py"

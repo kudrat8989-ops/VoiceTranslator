@@ -6,13 +6,24 @@ export function generateGuiLoopbackWorker(): string {
             try:
                 p = pyaudio.PyAudio()
                 wasapi = p.get_host_api_info_by_type(pyaudio.paWASAPI)
-                def_spk = p.get_device_info_by_index(wasapi["defaultOutputDevice"])
-                dev = def_spk
-                if not def_spk.get("isLoopbackDevice", False):
-                    for lb in p.get_loopback_device_info_generator():
-                        if def_spk["name"] in lb["name"]: dev = lb; break
+                def_out_idx = wasapi.get("defaultOutputDevice", -1)
+                def_spk_name = ""
+                if def_out_idx >= 0:
+                    try: def_spk_name = p.get_device_info_by_index(def_out_idx).get("name", "")
+                    except Exception: pass
 
-                sr, ch = int(dev["defaultSampleRate"]), max(1, int(dev["maxInputChannels"]))
+                found_lb = None
+                for lb in p.get_loopback_device_info_generator():
+                    if def_spk_name and def_spk_name in lb.get("name", ""):
+                        found_lb = lb; break
+                    if found_lb is None: found_lb = lb
+
+                if not found_lb:
+                    self.log_message("[LOOPBACK] Loopback-устройство не найдено", "sys_info")
+                    time.sleep(3.0); continue
+
+                dev = found_lb
+                sr, ch = int(dev.get("defaultSampleRate", 48000)), max(1, int(dev.get("maxInputChannels", 2)))
                 frames, loop_q = int(sr * 0.10), queue.Queue(maxsize=100)
 
                 def _lcb(in_data, frame_count, time_info, status):
@@ -58,25 +69,17 @@ export function generateGuiLoopbackWorker(): string {
                         raw_a = np.concatenate(speech_buf); speech_buf.clear(); silence_blocks = 0
                         if self.whisper_model is None: continue
                         a16k = resample_linear(raw_a, sr, 16000)
-                        dur_s = len(a16k) / 16000.0; t0 = time.perf_counter()
-
+                        if float(np.sqrt(np.mean(a16k**2))) < 0.001: continue
+                        t0 = time.perf_counter()
                         with self.gpu_lock:
-                            segs, _ = self.whisper_model.transcribe(a16k, language="en", task="transcribe", beam_size=1, temperature=0.0, without_timestamps=False, repetition_penalty=1.1, vad_filter=False, max_new_tokens=150)
-                            rec_en = clean_and_limit_whisper_words(" ".join(s.text.strip() for s in segs).strip(), dur_s)
-                        if not rec_en or is_hallucination(rec_en): continue
-
-                        def _gpu_translate_en_ru(_t):
-                            with self.gpu_lock:
-                                tr_segs, _ = self.whisper_model.transcribe(a16k, language="en", task="translate", beam_size=1, temperature=0.0)
-                                return " ".join(s.text.strip() for s in tr_segs).strip()
-
-                        trans_ru = TRANSLATOR.translate(rec_en, src="en", dst="ru", fallback_whisper_func=_gpu_translate_en_ru)
-                        lat = int((time.perf_counter() - t0) * 1000); ts = time.strftime("%H:%M:%S")
-                        self.log_message(f"[{ts}] СОБЕСЕДНИК (EN): {rec_en}", "en_peer")
-
-                        if trans_ru:
+                            segs, _ = self.whisper_model.transcribe(a16k, language="en", task="transcribe", beam_size=1, without_timestamps=False, vad_filter=True)
+                            en_txt = " ".join(s.text.strip() for s in segs).strip()
+                        if len(en_txt) > 1:
+                            trans_ru = translate_en_to_ru(en_txt)
+                            lat = int((time.perf_counter() - t0) * 1000)
+                            self.log_message(f"СОБЕСЕДНИК (EN): {en_txt}", "en_peer")
                             is_read = not self.loopback_auto_tts.get()
-                            self.log_message(f"           ПЕРЕВОД (RU) [{lat} мс{' [БЕЗ ОЗВУЧКИ]' if is_read else ''}]: {trans_ru}", "ru_reading" if is_read else "ru_silero")
+                            self.log_message(f"ПЕРЕВОД (RU) [{lat}мс]: {trans_ru}", "ru_reading" if is_read else "ru_silero")
                             if not is_read:
                                 try: self.silero_play_queue.put_nowait((sanitize_for_silero(trans_ru), trans_ru, lat))
                                 except queue.Full: pass

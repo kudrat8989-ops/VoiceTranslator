@@ -5,9 +5,19 @@ export function generateTranslatorMicPy(config: ProjectConfig): string {
   return toCrLf(`# -*- coding: utf-8 -*-
 """Консольный переводчик микрофона RU -> EN с озвучкой моих слов (translator_mic.py)"""
 import os, sys, time, queue, urllib.parse, http.client, json, threading, subprocess, numpy as np, sounddevice as sd
-from faster_whisper import WhisperModel
+from pathlib import Path
+import shutil
 from colorama import init, Fore
 init(autoreset=True)
+
+for p in [Path(sys.prefix) / "Lib" / "site-packages" / "nvidia" / "cublas" / "bin",
+            Path(sys.prefix) / "Lib" / "site-packages" / "nvidia" / "cudnn" / "bin",
+            Path(sys.prefix) / "Lib" / "site-packages" / "torch" / "lib"]:
+    if p.exists():
+        try: os.add_dll_directory(str(p.resolve())); os.environ["PATH"] = str(p.resolve()) + os.pathsep + os.environ.get("PATH", "")
+        except Exception: pass
+
+from faster_whisper import WhisperModel
 
 def speak_en_words(text: str):
     """Озвучивание переведённых слов на английский язык в наушники"""
@@ -58,7 +68,7 @@ def main():
                     if len(text) > 1:
                         en = translate_ru_en(text)
                         print(Fore.WHITE + f"ВЫ (RU): {text}")
-                        print(Fore.GREEN + f"-> EN (Озвучка): {en}")
+                        print(Fore.GREEN + f"ПЕРЕВОД (EN): {en}")
                         speak_en_words(en)
 
 if __name__ == "__main__":

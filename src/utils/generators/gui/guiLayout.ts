@@ -12,15 +12,15 @@ export function generateGuiLayout(): string {
         r1 = tk.Frame(dev_box, bg="#111726")
         r1.pack(fill=tk.X, pady=2)
         tk.Label(r1, text="Микрофон (Вход):", bg="#111726", fg="#34D399", font=("Segoe UI", 9, "bold"), width=18, anchor="w").pack(side=tk.LEFT)
-        self.combo_mic = ttk.Combobox(r1, textvariable=self.selected_primary_mic_label, state="readonly", width=48)
+        self.combo_mic = ttk.Combobox(r1, textvariable=self.selected_primary_mic_label, state="readonly", width=78)
         self.combo_mic.pack(side=tk.LEFT, padx=4)
         self.combo_mic.bind("<<ComboboxSelected>>", lambda e: setattr(self, "force_restart_flag", True))
-        tk.Button(r1, text="Обновить устройства", command=self._scan_audio_devices, bg="#1E293B", fg="#E2E8F0", relief=tk.FLAT, padx=6, pady=1, font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=6)
+        tk.Button(r1, text="Обновить", command=self._scan_audio_devices, bg="#1E293B", fg="#E2E8F0", relief=tk.FLAT, padx=6, pady=1, font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=6)
 
         r2 = tk.Frame(dev_box, bg="#111726")
         r2.pack(fill=tk.X, pady=2)
         tk.Label(r2, text="Вывод перевода EN:", bg="#111726", fg="#38BDF8", font=("Segoe UI", 9, "bold"), width=18, anchor="w").pack(side=tk.LEFT)
-        self.combo_out = ttk.Combobox(r2, textvariable=self.selected_mic_out_label, state="readonly", width=48)
+        self.combo_out = ttk.Combobox(r2, textvariable=self.selected_mic_out_label, state="readonly", width=78)
         self.combo_out.pack(side=tk.LEFT, padx=4)
 
         voice_box = tk.Frame(self.root, bg="#111726", padx=12, pady=6, highlightbackground="#F59E0B", highlightthickness=1)
