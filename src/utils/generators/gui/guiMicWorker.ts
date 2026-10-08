@@ -59,7 +59,7 @@ export function generateGuiMicWorker(): string {
                         t0 = time.perf_counter()
 
                         with self.gpu_lock:
-                            segs, _ = self.whisper_model.transcribe(a16k, language="ru", task="transcribe", beam_size=1, temperature=0.0, without_timestamps=False, repetition_penalty=1.1, vad_filter=False, max_new_tokens=150)
+                            segs, _ = self.whisper_model.transcribe(a16k, language="ru", task="transcribe", beam_size=1, temperature=0.0, without_timestamps=False, repetition_penalty=1.1, vad_filter=True, vad_parameters=dict(min_silence_duration_ms=400), max_new_tokens=150)
                             recognized_ru = clean_and_limit_whisper_words(" ".join(s.text.strip() for s in segs).strip(), dur_s)
 
                         if not recognized_ru or is_hallucination(recognized_ru): continue

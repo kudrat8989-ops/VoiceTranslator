@@ -75,7 +75,7 @@ export function generateGuiLoopbackWorker(): string {
                             segs, _ = self.whisper_model.transcribe(a16k, language="en", task="transcribe", beam_size=1, without_timestamps=False, vad_filter=True)
                             en_txt = " ".join(s.text.strip() for s in segs).strip()
                         if len(en_txt) > 1:
-                            trans_ru = translate_en_to_ru(en_txt)
+                            trans_ru = TRANSLATOR.translate(en_txt, src="en", dst="ru")
                             lat = int((time.perf_counter() - t0) * 1000)
                             self.log_message(f"СОБЕСЕДНИК (EN): {en_txt}", "en_peer")
                             is_read = not self.loopback_auto_tts.get()

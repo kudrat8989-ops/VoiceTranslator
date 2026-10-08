@@ -35,5 +35,11 @@ class FastKeepAliveTranslator:
         return clean
 
 TRANSLATOR = FastKeepAliveTranslator()
+
+def translate_en_to_ru(text: str) -> str:
+    return TRANSLATOR.translate(text, src="en", dst="ru")
+
+def translate_ru_to_en(text: str) -> str:
+    return TRANSLATOR.translate(text, src="ru", dst="en")
 `;
 }

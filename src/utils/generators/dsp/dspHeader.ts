@@ -83,6 +83,6 @@ NEURAL_VOICES = {
     "Aria Neural (Женский сопрано ~205 Гц)": "en-US-AriaNeural",
 }
 
-HALLUCINATIONS = ("dimatorzok", "субтитры", "редактор", "спасибо за просмотр", "подпишись", "amara.org", "subtitles by")
+HALLUCINATIONS = ("dimatorzok", "субтитры", "редактор", "спасибо за просмотр", "подпишись", "amara.org", "subtitles by", "продолжение следует", "to be continued", "до новых встреч", "ставьте лайк")
 `;
 }

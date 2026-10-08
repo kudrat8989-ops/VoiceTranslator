@@ -75,9 +75,23 @@ export function generateGuiLayout(): string {
 
         log_f = tk.Frame(self.root, bg="#0B0F17", padx=10, pady=4)
         log_f.pack(fill=tk.BOTH, expand=True)
-        self.txt_log = scrolledtext.ScrolledText(log_f, bg="#080B11", fg="#E2E8F0", insertbackground="#FFF", font=("Consolas", 10), wrap=tk.WORD, state=tk.DISABLED)
+        self.txt_log = scrolledtext.ScrolledText(log_f, bg="#080B11", fg="#E2E8F0", insertbackground="#FFF", selectbackground="#2563EB", selectforeground="#FFF", font=("Consolas", 10), wrap=tk.WORD, state=tk.DISABLED)
         self.txt_log.pack(fill=tk.BOTH, expand=True)
         for tag, col in [("sys_ok", "#34D399"), ("sys_info", "#94A3B8"), ("ru_you", "#F8FAFC"), ("en_out", "#34D399"), ("en_peer", "#38BDF8"), ("ru_silero", "#C084FC"), ("ru_reading", "#FBBF24"), ("err", "#F87171")]:
             self.txt_log.tag_config(tag, foreground=col)
+
+        def _do_copy(e=None):
+            try:
+                sel = self.txt_log.get(tk.SEL_FIRST, tk.SEL_LAST)
+                if sel: self.root.clipboard_clear(); self.root.clipboard_append(sel)
+            except Exception: pass
+            return "break"
+        self.txt_log.bind("<Control-c>", _do_copy); self.txt_log.bind("<Control-C>", _do_copy)
+        l_menu = tk.Menu(self.txt_log, tearoff=0, bg="#1E293B", fg="#F8FAFC", activebackground="#2563EB")
+        l_menu.add_command(label="Копировать выделенное (Ctrl+C)", command=_do_copy)
+        l_menu.add_command(label="Копировать весь лог", command=lambda: (self.root.clipboard_clear(), self.root.clipboard_append(self.txt_log.get("1.0", tk.END))))
+        l_menu.add_separator()
+        l_menu.add_command(label="Очистить лог", command=lambda: (self.txt_log.config(state=tk.NORMAL), self.txt_log.delete("1.0", tk.END), self.txt_log.config(state=tk.DISABLED)))
+        self.txt_log.bind("<Button-3>", lambda e: l_menu.post(e.x_root, e.y_root))
 `;
 }
